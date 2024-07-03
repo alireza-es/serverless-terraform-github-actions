@@ -7,7 +7,7 @@ terraform {
   }
   backend "s3" {
     bucket = "hbl.tfstate" # change to name of your bucket
-    region = "us-west-1"                   # change to your region
+    region = "ca-central-1"                   # change to your region
     key    = "terraform.tfstate"
   }
 }
