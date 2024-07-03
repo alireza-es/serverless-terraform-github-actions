@@ -1,56 +1,54 @@
-name: "terraform-deploy"
+name: Deploy to AWS
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 jobs:
-  PushToAWS:
+  deploy:
     runs-on: ubuntu-latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
-      jwtSecret: ${{ secrets.JWT_SECRET }} #github secret
 
     steps:
-      - uses: actions/checkout@v2
-      - name: Use Node.js 16
-        uses: actions/setup-node@v3
-        with:
-          node-version: "16.x"
-      - run: |
-          npm i -D typescript ts-loader webpack webpack-cli
-          cd api && npm ci
-          # tsc
-          cd ..
-          mkdir zip
-          zip -r zip/api.zip api
-        env:
-          CI: true
-      - name: Push Zip to S3
-        uses: jakejarvis/s3-sync-action@v0.3.1
-        env:
-          SOURCE_DIR: "./zip"
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/requirements.txt
+      - name: Build Lambda package
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/var/task "lambci/lambda:build-python3.8" /bin/sh -c "cd src && pip install -r requirements.txt -t . && zip -r ../lambda_package.zip ."
+        working-directory: src
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ca-central-1
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3.1.1
+
+      - name: Set Variables
+        run: |
+          echo "export TF_CLOUD_ORGANIZATION=honeybee-logic" >> $GITHUB_ENV
 
       - name: Terraform Init
         id: init
         run: |
-          terraform fmt
-          terraform init -upgrade
+          terraform -chdir=terraform fmt
+          terraform -chdir=terraform init -upgrade
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform -chdir=terraform apply -auto-approve
         env:
           TF_VAR_aws_s3_bucket: ${{ secrets.AWS_S3_BUCKET }}
           TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
